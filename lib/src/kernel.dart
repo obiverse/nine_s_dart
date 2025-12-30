@@ -60,8 +60,8 @@ class Kernel implements Namespace {
   /// Here we initialize inline, so it's just documentation that it's set once.
   final SplayTreeMap<String, Namespace> _mounts = SplayTreeMap();
 
-  /// Stream controllers for watch aggregation
-  final List<StreamController<Scroll>> _watchControllers = [];
+  /// Stream controllers for watch aggregation with GC-aware cleanup
+  final List<_KernelWatcher> _watchControllers = [];
 
   /// Closed flag
   bool _closed = false;
@@ -254,7 +254,7 @@ class Kernel implements Namespace {
       },
     );
 
-    _watchControllers.add(controller);
+    _watchControllers.add(_KernelWatcher(controller: controller));
     return Ok(controller.stream);
   }
 
@@ -282,8 +282,8 @@ class Kernel implements Namespace {
     _closed = true;
 
     // Close all watch controllers
-    for (final controller in _watchControllers) {
-      controller.close();
+    for (final watcher in _watchControllers) {
+      watcher.controller.close();
     }
     _watchControllers.clear();
 
@@ -294,4 +294,20 @@ class Kernel implements Namespace {
 
     return const Ok(null);
   }
+}
+
+/// Internal watcher state with GC-aware cleanup for Kernel
+///
+/// See MemoryNamespace for detailed explanation of the WeakReference pattern.
+class _KernelWatcher {
+  final StreamController<Scroll> controller;
+
+  /// Weak reference to the stream returned to user
+  final WeakReference<Stream<Scroll>> streamRef;
+
+  _KernelWatcher({required this.controller})
+      : streamRef = WeakReference(controller.stream);
+
+  /// Check if this watcher is still alive
+  bool get isDead => controller.isClosed || streamRef.target == null;
 }

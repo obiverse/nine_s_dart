@@ -157,7 +157,8 @@ Anchor createAnchor(Scroll scroll, {String? label}) {
   final timestamp = DateTime.now().millisecondsSinceEpoch;
 
   // Add random suffix for uniqueness when creating multiple anchors in same millisecond
-  final suffix = Random().nextInt(0xFFFF).toRadixString(16).padLeft(4, '0');
+  // Use Random.secure() for cryptographically secure randomness
+  final suffix = Random.secure().nextInt(0xFFFF).toRadixString(16).padLeft(4, '0');
   final id = '${hash.substring(0, 8)}-$timestamp-$suffix';
 
   return Anchor(

@@ -198,13 +198,33 @@ extension NineErrorExtensions on NineError {
 ///
 /// "Five operations. Frozen. Never a sixth."
 ///
-/// ## Dart Lesson: FutureOr
+/// ## Design Decision: Synchronous Interface
 ///
-/// `FutureOr<T>` means the method can return either `T` or `Future<T>`.
-/// This allows sync implementations to return values directly,
-/// while async implementations can return futures.
+/// This interface is deliberately synchronous. This is a conscious choice:
 ///
-/// The caller can use `await` regardless - Dart handles both cases.
+/// **Rationale:**
+/// 1. Local storage (memory, file, encrypted store) is inherently fast
+/// 2. Synchronous code is simpler to reason about
+/// 3. No async overhead for hot paths
+/// 4. Composition via Kernel is straightforward
+///
+/// **For Network Backends:**
+/// If you need async operations (e.g., networked storage, remote namespaces),
+/// create a separate `AsyncNamespace` interface with `Future<Result<T>>` returns.
+/// Use adapters to bridge between sync and async worlds:
+///
+/// ```dart
+/// /// Adapter: wrap async namespace for sync consumption (with caching)
+/// class CachedAsyncNamespace implements Namespace {
+///   final AsyncNamespace _remote;
+///   final MemoryNamespace _cache;
+///   // Sync reads from cache, async sync in background
+/// }
+/// ```
+///
+/// This follows the principle: "Extensions come from new Namespace
+/// implementations, never new operations." An async interface is a new
+/// implementation pattern, not a new operation.
 abstract interface class Namespace {
   /// Read a scroll by path
   ///

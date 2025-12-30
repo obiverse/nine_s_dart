@@ -13,6 +13,16 @@
 /// 1. Streams are lazy (no work until listened)
 /// 2. Streams can be broadcast (multiple listeners)
 /// 3. Streams integrate with async/await naturally
+///
+/// ## Dart Lesson: Finalizer for GC-Aware Cleanup
+///
+/// Dart 2.17+ provides `Finalizer` and `WeakReference` for GC integration:
+///
+/// - `Finalizer<T>` - Runs a callback when an object is garbage collected
+/// - `WeakReference<T>` - Holds a reference without preventing GC
+///
+/// This enables "release when forgotten" semantics - if user code drops all
+/// references to a watch stream, the watcher cleans itself up automatically.
 library;
 
 import 'dart:async';
@@ -63,9 +73,24 @@ class MemoryNamespace implements Namespace {
   ///
   /// This is different from Rust's try_send which returns immediately.
   /// In Dart, the event is queued and processed in the next microtask.
+  ///
+  /// ## GC-Aware Cleanup
+  ///
+  /// We check `isDead` which includes WeakReference check. If user code
+  /// has dropped all references to the stream, GC will collect it and
+  /// we clean up automatically - no explicit cancel needed.
   void _notifyWatchers(Scroll scroll) {
-    // Remove closed watchers first
-    _watchers.removeWhere((w) => w.controller.isClosed);
+    // Remove dead watchers (closed OR garbage collected)
+    _watchers.removeWhere((w) {
+      if (w.isDead) {
+        // Ensure controller is closed to release resources
+        if (!w.controller.isClosed) {
+          w.controller.close();
+        }
+        return true;
+      }
+      return false;
+    });
 
     // Notify matching watchers
     for (final watcher in _watchers) {
@@ -182,8 +207,8 @@ class MemoryNamespace implements Namespace {
     final validation = validatePath(pattern);
     if (validation.isErr) return Err(validation.errorOrNull!);
 
-    // Check watcher limit
-    _watchers.removeWhere((w) => w.controller.isClosed);
+    // Check watcher limit (also cleanup dead watchers)
+    _watchers.removeWhere((w) => w.isDead);
     if (_watchers.length >= _maxWatchers) {
       return const Err(UnavailableError('too many watchers'));
     }
@@ -235,10 +260,32 @@ class MemoryNamespace implements Namespace {
   void clear() => _store.clear();
 }
 
-/// Internal watcher state
+/// Internal watcher state with GC-aware cleanup
+///
+/// ## Dart Lesson: WeakReference for GC Integration
+///
+/// We hold a WeakReference to the Stream. When user code drops all references
+/// to the stream, it becomes eligible for GC. On the next `_notifyWatchers`
+/// call, we detect `target == null` and clean up.
+///
+/// This is more efficient than checking `controller.isClosed` because:
+/// 1. User doesn't need to explicitly cancel/close
+/// 2. GC handles cleanup automatically when stream is forgotten
+/// 3. No memory leaks from abandoned watchers
 class _Watcher {
   final String pattern;
   final StreamController<Scroll> controller;
 
-  _Watcher({required this.pattern, required this.controller});
+  /// Weak reference to the stream - allows GC to collect if user drops it
+  final WeakReference<Stream<Scroll>> streamRef;
+
+  _Watcher({required this.pattern, required this.controller})
+      : streamRef = WeakReference(controller.stream);
+
+  /// Check if this watcher is still alive
+  ///
+  /// A watcher is dead if:
+  /// 1. The controller is closed, OR
+  /// 2. The stream has been garbage collected (user dropped all references)
+  bool get isDead => controller.isClosed || streamRef.target == null;
 }

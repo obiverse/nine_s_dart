@@ -59,8 +59,19 @@ class FileNamespace implements Namespace {
   }
 
   /// Notify all watchers of a change
+  ///
+  /// Uses GC-aware cleanup - see MemoryNamespace for detailed explanation.
   void _notifyWatchers(Scroll scroll) {
-    _watchers.removeWhere((w) => w.controller.isClosed);
+    // Remove dead watchers (closed OR garbage collected)
+    _watchers.removeWhere((w) {
+      if (w.isDead) {
+        if (!w.controller.isClosed) {
+          w.controller.close();
+        }
+        return true;
+      }
+      return false;
+    });
 
     for (final watcher in _watchers) {
       if (pathMatches(scroll.key, watcher.pattern)) {
@@ -235,8 +246,8 @@ class FileNamespace implements Namespace {
     final validation = validatePath(pattern);
     if (validation.isErr) return Err(validation.errorOrNull!);
 
-    // Check watcher limit
-    _watchers.removeWhere((w) => w.controller.isClosed);
+    // Check watcher limit (also cleanup dead watchers)
+    _watchers.removeWhere((w) => w.isDead);
     if (_watchers.length >= _maxWatchers) {
       return const Err(UnavailableError('too many watchers'));
     }
@@ -317,10 +328,19 @@ class FileNamespace implements Namespace {
   }
 }
 
-/// Internal watcher state
+/// Internal watcher state with GC-aware cleanup
+///
+/// See MemoryNamespace for detailed explanation of the WeakReference pattern.
 class _Watcher {
   final String pattern;
   final StreamController<Scroll> controller;
 
-  _Watcher({required this.pattern, required this.controller});
+  /// Weak reference to the stream - allows GC to collect if user drops it
+  final WeakReference<Stream<Scroll>> streamRef;
+
+  _Watcher({required this.pattern, required this.controller})
+      : streamRef = WeakReference(controller.stream);
+
+  /// Check if this watcher is still alive
+  bool get isDead => controller.isClosed || streamRef.target == null;
 }

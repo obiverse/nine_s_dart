@@ -68,7 +68,7 @@ class Store implements Namespace {
   final Directory _scrollsDir;
   final Directory _historyDir;
   bool _closed = false;
-  final List<StreamController<Scroll>> _watchers = [];
+  final List<_StoreWatcher> _watchers = [];
 
   Store._({
     required Directory baseDir,
@@ -261,18 +261,18 @@ class Store implements Namespace {
     final validation = validatePath(pattern);
     if (validation.isErr) return Err(validation.errorOrNull!);
 
-    final controller = StreamController<Scroll>(
-      onCancel: () {
-        // Will be cleaned up on next notification
-      },
-    );
+    // Cleanup dead watchers on new watch
+    _watchers.removeWhere((w) => w.isDead);
 
-    _watchers.add(controller);
+    final controller = StreamController<Scroll>();
 
     // Wrap the stream to filter by pattern
     final filteredStream = controller.stream.where((scroll) {
       return pathMatches(scroll.key, pattern);
     });
+
+    // Track with weak reference to the filtered stream
+    _watchers.add(_StoreWatcher(controller: controller, stream: filteredStream));
 
     return Ok(filteredStream);
   }
@@ -282,17 +282,28 @@ class Store implements Namespace {
     _closed = true;
 
     for (final watcher in _watchers) {
-      watcher.close();
+      watcher.controller.close();
     }
     _watchers.clear();
 
     return const Ok(null);
   }
 
+  /// Notify watchers with GC-aware cleanup
   void _notifyWatchers(Scroll scroll) {
-    _watchers.removeWhere((w) => w.isClosed);
+    // Remove dead watchers (closed OR garbage collected)
+    _watchers.removeWhere((w) {
+      if (w.isDead) {
+        if (!w.controller.isClosed) {
+          w.controller.close();
+        }
+        return true;
+      }
+      return false;
+    });
+
     for (final watcher in _watchers) {
-      watcher.add(scroll);
+      watcher.controller.add(scroll);
     }
   }
 
@@ -452,4 +463,20 @@ class Store implements Namespace {
         File('${patchesDir.path}/${patch.seq.toString().padLeft(8, '0')}.json');
     patchFile.writeAsStringSync(jsonEncode(patch.toJson()));
   }
+}
+
+/// Internal watcher state with GC-aware cleanup for Store
+///
+/// Store watchers wrap the filtered stream, so we track the wrapper stream.
+class _StoreWatcher {
+  final StreamController<Scroll> controller;
+
+  /// Weak reference to the filtered stream returned to user
+  final WeakReference<Stream<Scroll>> streamRef;
+
+  _StoreWatcher({required this.controller, required Stream<Scroll> stream})
+      : streamRef = WeakReference(stream);
+
+  /// Check if this watcher is still alive
+  bool get isDead => controller.isClosed || streamRef.target == null;
 }

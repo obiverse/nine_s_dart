@@ -1,0 +1,259 @@
+/// MemoryNamespace - In-memory 9S Backend
+///
+/// Prima materia - the simplest namespace.
+/// All data in RAM. No persistence. Perfect for testing and transient state.
+///
+/// ## Dart Lesson: StreamController for Reactive Systems
+///
+/// Dart's StreamController is the bridge between imperative writes and
+/// reactive subscriptions. When we call `write()`, we notify all watchers
+/// via their StreamControllers.
+///
+/// This is Dart's version of Rust's channels, but with key differences:
+/// 1. Streams are lazy (no work until listened)
+/// 2. Streams can be broadcast (multiple listeners)
+/// 3. Streams integrate with async/await naturally
+library;
+
+import 'dart:async';
+
+import '../namespace.dart';
+import '../scroll.dart';
+
+/// Maximum number of concurrent watchers
+const _maxWatchers = 1024;
+
+/// MemoryNamespace - In-memory implementation
+///
+/// ## Dart Lesson: Private Fields
+///
+/// In Dart, `_fieldName` (leading underscore) makes a field library-private.
+/// This is different from class-private - other classes in this file can access it.
+/// True encapsulation requires putting classes in separate files.
+class MemoryNamespace implements Namespace {
+  /// In-memory storage
+  ///
+  /// ## Dart Lesson: Map Literal Types
+  ///
+  /// `<String, Scroll>{}` explicitly types the map.
+  /// Dart can often infer types, but explicit is clearer for class fields.
+  final Map<String, Scroll> _store = {};
+
+  /// Active watchers
+  final List<_Watcher> _watchers = [];
+
+  /// Closed flag
+  bool _closed = false;
+
+  /// Create a new in-memory namespace
+  MemoryNamespace();
+
+  /// Check if closed
+  Result<void> _checkClosed() {
+    if (_closed) return const Err(ClosedError());
+    return const Ok(null);
+  }
+
+  /// Notify all watchers of a change
+  ///
+  /// ## Dart Lesson: Synchronous vs Async Notification
+  ///
+  /// We use synchronous notification (StreamController.add is sync).
+  /// The watchers' handlers run in microtasks, so writes don't block.
+  ///
+  /// This is different from Rust's try_send which returns immediately.
+  /// In Dart, the event is queued and processed in the next microtask.
+  void _notifyWatchers(Scroll scroll) {
+    // Remove closed watchers first
+    _watchers.removeWhere((w) => w.controller.isClosed);
+
+    // Notify matching watchers
+    for (final watcher in _watchers) {
+      if (pathMatches(scroll.key, watcher.pattern)) {
+        watcher.controller.add(scroll);
+      }
+    }
+  }
+
+  // ============================================================================
+  // Namespace Implementation
+  // ============================================================================
+
+  @override
+  Result<Scroll?> read(String path) {
+    final closed = _checkClosed();
+    if (closed.isErr) return Err(closed.errorOrNull!);
+
+    final validation = validatePath(path);
+    if (validation.isErr) return Err(validation.errorOrNull!);
+
+    return Ok(_store[path]);
+  }
+
+  @override
+  Result<Scroll> write(String path, Map<String, dynamic> data) {
+    final closed = _checkClosed();
+    if (closed.isErr) return Err(closed.errorOrNull!);
+
+    final validation = validatePath(path);
+    if (validation.isErr) return Err(validation.errorOrNull!);
+
+    // Get previous version
+    final prevVersion = _store[path]?.metadata.version ?? 0;
+
+    // Create scroll with rich metadata
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var scroll = Scroll(
+      key: path,
+      data: data,
+      metadata: Metadata(
+        version: prevVersion + 1,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    scroll = scroll.copyWith(
+      metadata: scroll.metadata.copyWith(hash: scroll.computeHash()),
+    );
+
+    // Store it
+    _store[path] = scroll;
+
+    // Notify watchers
+    _notifyWatchers(scroll);
+
+    return Ok(scroll);
+  }
+
+  @override
+  Result<Scroll> writeScroll(Scroll scroll) {
+    final closed = _checkClosed();
+    if (closed.isErr) return Err(closed.errorOrNull!);
+
+    final validation = validatePath(scroll.key);
+    if (validation.isErr) return Err(validation.errorOrNull!);
+
+    // Get previous version
+    final prevVersion = _store[scroll.key]?.metadata.version ?? 0;
+
+    // Create new scroll preserving type from input
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var newScroll = scroll.copyWith(
+      metadata: scroll.metadata.copyWith(
+        version: prevVersion + 1,
+        createdAt: scroll.metadata.createdAt ?? now,
+        updatedAt: now,
+      ),
+    );
+    newScroll = newScroll.copyWith(
+      metadata: newScroll.metadata.copyWith(hash: newScroll.computeHash()),
+    );
+
+    // Store it
+    _store[scroll.key] = newScroll;
+
+    // Notify watchers
+    _notifyWatchers(newScroll);
+
+    return Ok(newScroll);
+  }
+
+  @override
+  Result<List<String>> list(String prefix) {
+    final closed = _checkClosed();
+    if (closed.isErr) return Err(closed.errorOrNull!);
+
+    final validation = validatePath(prefix);
+    if (validation.isErr) return Err(validation.errorOrNull!);
+
+    // Filter keys under prefix with segment boundary check
+    final paths = _store.keys
+        .where((k) => isPathUnderPrefix(k, prefix))
+        .toList();
+
+    return Ok(paths);
+  }
+
+  @override
+  Result<Stream<Scroll>> watch(String pattern) {
+    final closed = _checkClosed();
+    if (closed.isErr) return Err(closed.errorOrNull!);
+
+    final validation = validatePath(pattern);
+    if (validation.isErr) return Err(validation.errorOrNull!);
+
+    // Check watcher limit
+    _watchers.removeWhere((w) => w.controller.isClosed);
+    if (_watchers.length >= _maxWatchers) {
+      return const Err(UnavailableError('too many watchers'));
+    }
+
+    // Create stream controller
+    ///
+    /// ## Dart Lesson: Broadcast Streams
+    ///
+    /// `StreamController.broadcast()` allows multiple listeners.
+    /// Regular controllers only allow one listener.
+    ///
+    /// For 9S, we use regular controllers (one watcher = one stream).
+    /// If you needed multiple listeners on the same pattern, use broadcast.
+    final controller = StreamController<Scroll>(
+      onCancel: () {
+        // Controller will be removed on next write via removeWhere
+      },
+    );
+
+    _watchers.add(_Watcher(pattern: pattern, controller: controller));
+
+    return Ok(controller.stream);
+  }
+
+  @override
+  Result<bool> delete(String path) {
+    final closed = _checkClosed();
+    if (closed.isErr) return Err(closed.errorOrNull!);
+
+    final validation = validatePath(path);
+    if (validation.isErr) return Err(validation.errorOrNull!);
+
+    final existed = _store.containsKey(path);
+    if (existed) {
+      _store.remove(path);
+    }
+    return Ok(existed);
+  }
+
+  @override
+  Result<void> close() {
+    _closed = true;
+
+    // Close all watchers
+    for (final watcher in _watchers) {
+      watcher.controller.close();
+    }
+    _watchers.clear();
+
+    return const Ok(null);
+  }
+
+  // ============================================================================
+  // Convenience Methods
+  // ============================================================================
+
+  /// Get current scroll count
+  int get length => _store.length;
+
+  /// Check if path exists
+  bool containsKey(String path) => _store.containsKey(path);
+
+  /// Clear all data (but keep watchers)
+  void clear() => _store.clear();
+}
+
+/// Internal watcher state
+class _Watcher {
+  final String pattern;
+  final StreamController<Scroll> controller;
+
+  _Watcher({required this.pattern, required this.controller});
+}

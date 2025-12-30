@@ -1,0 +1,16 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    # Clarity
+    prefer_single_quotes: true
+    prefer_final_locals: true
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+
+    # Safety
+    avoid_dynamic_calls: true
+    prefer_void_to_null: true
+
+    # 9S Philosophy: Programs for humans
+    lines_longer_than_80_chars: false  # Prefer clarity over arbitrary limits

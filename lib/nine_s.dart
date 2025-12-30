@@ -69,7 +69,11 @@ export 'src/utils.dart';
 export 'src/patch.dart';
 export 'src/anchor.dart';
 export 'src/sealed.dart';
-export 'src/store.dart';
+
+// Store - Universal Storage Abstraction
+// Store.memory() for RAM, Store.open() for file-backed
+// Encrypted by default when key provided (backward compatible)
+export 'src/store/store.dart' show Store;
 
 // Backends
 export 'src/backends/memory.dart';

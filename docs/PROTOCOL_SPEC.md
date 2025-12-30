@@ -4,6 +4,34 @@
 
 ---
 
+## 0. Frozen Protocol Declaration
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│   THIS PROTOCOL IS FROZEN                                           │
+│                                                                     │
+│   The five operations are immutable:                                │
+│                                                                     │
+│       read    write    list    watch    close                       │
+│                                                                     │
+│   No sixth operation will be added.                                 │
+│   No operation will be removed.                                     │
+│   No operation signature will change.                               │
+│                                                                     │
+│   Extensions come from new Namespace implementations,               │
+│   never from protocol modifications.                                │
+│                                                                     │
+│   This specification may receive clarifications but                 │
+│   not behavioral changes. Version 1.0 is final.                     │
+│                                                                     │
+│   Frozen: 2024-12-30                                                │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 1. Overview
 
 This document specifies the 9S (Nine Scrolls) protocol in precise, implementable terms. It is intended for developers creating 9S-compliant namespaces in any language.
@@ -646,10 +674,25 @@ test("close prevents operations"):
 
 ## 12. Version History
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0 | 2024-12-30 | Initial specification |
+| Version | Date | Status | Changes |
+|---------|------|--------|---------|
+| 1.0 | 2024-12-30 | **FROZEN** | Initial and final specification |
 
 ---
 
-*This specification is frozen. Extensions come from new namespace implementations, never from protocol changes.*
+## 13. Cryptographic Commitment
+
+The SHA-256 hash of this specification (excluding this section) serves as a cryptographic commitment to its frozen state.
+
+Future documents may reference this hash to verify they are implementing the authentic, unmodified 9S protocol.
+
+---
+
+```
+"Five operations. Frozen. Forever."
+
+    read    write    list    watch    close
+
+This specification is sealed. The protocol is complete.
+Extensions come from implementations, never from modifications.
+```

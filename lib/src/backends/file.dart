@@ -267,10 +267,13 @@ class FileNamespace implements Namespace {
   }
 
   // ============================================================================
-  // Additional Convenience Methods
+  // Convenience Methods (not part of frozen interface)
   // ============================================================================
 
-  @override
+  /// Delete a scroll at the given path
+  ///
+  /// Returns `Ok(true)` if deleted, `Ok(false)` if didn't exist.
+  /// Note: This is a convenience method, not part of the frozen 5 operations.
   Result<bool> delete(String path) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);

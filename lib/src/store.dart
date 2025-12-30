@@ -278,25 +278,6 @@ class Store implements Namespace {
   }
 
   @override
-  Result<bool> delete(String path) {
-    final closed = _checkClosed();
-    if (closed.isErr) return Err(closed.errorOrNull!);
-
-    final validation = validatePath(path);
-    if (validation.isErr) return Err(validation.errorOrNull!);
-
-    try {
-      final file = _scrollFile(path);
-      if (!file.existsSync()) return const Ok(false);
-
-      file.deleteSync();
-      return const Ok(true);
-    } catch (e) {
-      return Err(InternalError('Delete failed: $e'));
-    }
-  }
-
-  @override
   Result<void> close() {
     _closed = true;
 

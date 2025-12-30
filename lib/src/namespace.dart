@@ -191,10 +191,12 @@ extension NineErrorExtensions on NineError {
   Result<T> err<T>() => Err<T>(this);
 }
 
-/// Namespace - The 6 frozen operations
+/// Namespace - The 5 frozen operations
 ///
-/// All functionality in 9S emerges from these six operations.
+/// All functionality in 9S emerges from these five operations.
 /// Extensions are new Namespace implementations, not new operations.
+///
+/// "Five operations. Frozen. Never a sixth."
 ///
 /// ## Dart Lesson: FutureOr
 ///
@@ -250,17 +252,6 @@ abstract interface class Namespace {
   ///
   /// Unlike Rust channels, Dart streams are lazy (nothing happens until listen).
   Result<Stream<Scroll>> watch(String pattern);
-
-  /// Delete a scroll at the given path
-  ///
-  /// Returns `Ok(true)` if deleted, `Ok(false)` if path didn't exist.
-  /// Returns `Err` on failure (permission, I/O, etc.)
-  ///
-  /// ## Why bool instead of void?
-  ///
-  /// Knowing whether something existed is useful for conditional logic
-  /// without requiring a separate read() call.
-  Result<bool> delete(String path);
 
   /// Close the namespace and release resources
   ///

@@ -29,6 +29,7 @@
 library;
 
 import 'scroll.dart';
+import 'utils.dart' show deepEquals, deepCopyMap;
 
 /// A single JSON Patch operation (RFC 6902)
 ///
@@ -368,7 +369,7 @@ List<PatchOp> _computeDiff(
 
       if (!old.containsKey(key)) {
         ops.add(AddOp(path: keyPath, value: newVal));
-      } else if (!_deepEquals(old[key], newVal)) {
+      } else if (!deepEquals(old[key], newVal)) {
         // Recurse for nested changes
         ops.addAll(_computeDiff(keyPath, old[key], newVal));
       }
@@ -376,12 +377,12 @@ List<PatchOp> _computeDiff(
   }
   // Both arrays: simplified diff (replace if different)
   else if (old is List && current is List) {
-    if (!_deepEquals(old, current)) {
+    if (!deepEquals(old, current)) {
       ops.add(ReplaceOp(path: path, value: current));
     }
   }
   // Different types or primitives: replace
-  else if (!_deepEquals(old, current)) {
+  else if (!deepEquals(old, current)) {
     ops.add(ReplaceOp(path: path, value: current));
   }
 
@@ -413,7 +414,7 @@ PatchResult<Map<String, dynamic>> _applyOp(Map<String, dynamic> data, PatchOp op
         return PatchOk(_setAtPointer(data, path, value, mustExist: false));
       case TestOp(:final path, :final value):
         final actual = _getAtPointer(data, path);
-        if (!_deepEquals(actual, value)) {
+        if (!deepEquals(actual, value)) {
           return PatchErr(TestFailedError('expected $value, got $actual'));
         }
         return PatchOk(data);
@@ -463,7 +464,7 @@ Map<String, dynamic> _setAtPointer(
   }
 
   // Deep copy the data
-  final newData = _deepCopy(data);
+  final newData = deepCopyMap(data);
   final parts = _parsePointer(pointer);
   final last = parts.removeLast();
 
@@ -515,7 +516,7 @@ Map<String, dynamic> _setAtPointer(
     throw const InvalidPointerError('cannot remove root');
   }
 
-  final newData = _deepCopy(data);
+  final newData = deepCopyMap(data);
   final parts = _parsePointer(pointer);
   final last = parts.removeLast();
 
@@ -568,36 +569,4 @@ List<String> _parsePointer(String pointer) {
       .split('/')
       .map((s) => s.replaceAll('~1', '/').replaceAll('~0', '~'))
       .toList();
-}
-
-/// Deep copy a map
-Map<String, dynamic> _deepCopy(Map<String, dynamic> data) {
-  return data.map((key, value) {
-    if (value is Map<String, dynamic>) {
-      return MapEntry(key, _deepCopy(value));
-    } else if (value is List) {
-      return MapEntry(key, List.from(value));
-    }
-    return MapEntry(key, value);
-  });
-}
-
-/// Deep equality check
-bool _deepEquals(dynamic a, dynamic b) {
-  if (a is Map && b is Map) {
-    if (a.length != b.length) return false;
-    for (final key in a.keys) {
-      if (!b.containsKey(key)) return false;
-      if (!_deepEquals(a[key], b[key])) return false;
-    }
-    return true;
-  }
-  if (a is List && b is List) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (!_deepEquals(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  return a == b;
 }

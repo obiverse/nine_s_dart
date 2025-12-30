@@ -209,21 +209,6 @@ class MemoryNamespace implements Namespace {
   }
 
   @override
-  Result<bool> delete(String path) {
-    final closed = _checkClosed();
-    if (closed.isErr) return Err(closed.errorOrNull!);
-
-    final validation = validatePath(path);
-    if (validation.isErr) return Err(validation.errorOrNull!);
-
-    final existed = _store.containsKey(path);
-    if (existed) {
-      _store.remove(path);
-    }
-    return Ok(existed);
-  }
-
-  @override
   Result<void> close() {
     _closed = true;
 

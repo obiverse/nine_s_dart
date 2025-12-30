@@ -28,6 +28,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import 'metadata.dart';
+import 'utils.dart' show deepEquals;
 
 export 'metadata.dart';
 
@@ -329,7 +330,7 @@ class Scroll {
     if (other is! Scroll) return false;
     return key == other.key &&
         type_ == other.type_ &&
-        _mapEquals(data, other.data);
+        deepEquals(data, other.data);
   }
 
   @override
@@ -337,20 +338,4 @@ class Scroll {
 
   @override
   String toString() => 'Scroll($key, type: $type_, data: $data)';
-}
-
-/// Deep equality for maps (simple implementation)
-bool _mapEquals(Map<String, dynamic> a, Map<String, dynamic> b) {
-  if (a.length != b.length) return false;
-  for (final key in a.keys) {
-    if (!b.containsKey(key)) return false;
-    final va = a[key];
-    final vb = b[key];
-    if (va is Map<String, dynamic> && vb is Map<String, dynamic>) {
-      if (!_mapEquals(va, vb)) return false;
-    } else if (va != vb) {
-      return false;
-    }
-  }
-  return true;
 }

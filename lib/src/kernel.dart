@@ -278,15 +278,6 @@ class Kernel implements Namespace {
   }
 
   @override
-  Result<bool> delete(String path) {
-    final resolved = _resolve(path);
-    if (resolved.isErr) return Err(resolved.errorOrNull!);
-
-    final (ns, stripped) = resolved.value;
-    return ns.delete(stripped);
-  }
-
-  @override
   Result<void> close() {
     _closed = true;
 

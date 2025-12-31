@@ -28,7 +28,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import 'metadata.dart';
-import 'utils.dart' show deepEquals;
+import '../utils/utils.dart' show deepEquals;
 
 export 'metadata.dart';
 

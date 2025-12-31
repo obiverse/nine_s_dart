@@ -25,7 +25,7 @@ library;
 
 import 'dart:math';
 
-import 'scroll.dart';
+import '../scroll/scroll.dart';
 
 /// An immutable checkpoint of a scroll's state
 ///

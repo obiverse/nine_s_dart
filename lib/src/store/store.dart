@@ -57,13 +57,19 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../namespace.dart';
-import '../scroll.dart';
-import '../patch.dart';
-import '../anchor.dart';
-import '../utils.dart' as utils;
+import '../namespace/namespace.dart';
+import '../scroll/scroll.dart';
+import '../patch/patch.dart';
+import '../anchor/anchor.dart';
+import '../utils/utils.dart' as utils;
 import '../backends/memory.dart';
 import '../backends/file.dart';
+
+/// Default maximum number of patches to retain per path
+const defaultMaxPatches = 100;
+
+/// Default maximum number of anchors to retain per path
+const defaultMaxAnchors = 10;
 
 /// Store - Universal storage abstraction
 ///
@@ -74,6 +80,8 @@ class Store implements Namespace {
   final Uint8List? _key;
   final bool _history;
   final String? _path;
+  final int _maxPatches;
+  final int _maxAnchors;
   final Map<String, List<Patch>> _patches = {};
   final Map<String, List<Anchor>> _anchors = {};
   final StreamController<Scroll> _changes = StreamController.broadcast();
@@ -84,10 +92,14 @@ class Store implements Namespace {
     Uint8List? key,
     bool history = false,
     String? path,
+    int maxPatches = defaultMaxPatches,
+    int maxAnchors = defaultMaxAnchors,
   })  : _backend = backend,
         _key = key,
         _history = history,
-        _path = path;
+        _path = path,
+        _maxPatches = maxPatches,
+        _maxAnchors = maxAnchors;
 
   // ===========================================================================
   // STATIC HELPERS
@@ -237,7 +249,7 @@ class Store implements Namespace {
   // ===========================================================================
 
   @override
-  Result<Scroll?> read(String path) {
+  NineResult<Scroll?> read(String path) {
     if (_closed) return const Err(ClosedError());
 
     final validation = validatePath(path);
@@ -258,12 +270,12 @@ class Store implements Namespace {
   }
 
   @override
-  Result<Scroll> write(String path, Map<String, dynamic> data) {
+  NineResult<Scroll> write(String path, Map<String, dynamic> data) {
     return writeScroll(Scroll.create(path, data));
   }
 
   @override
-  Result<Scroll> writeScroll(Scroll scroll) {
+  NineResult<Scroll> writeScroll(Scroll scroll) {
     if (_closed) return const Err(ClosedError());
 
     final validation = validatePath(scroll.key);
@@ -316,13 +328,13 @@ class Store implements Namespace {
   }
 
   @override
-  Result<List<String>> list(String prefix) {
+  NineResult<List<String>> list(String prefix) {
     if (_closed) return const Err(ClosedError());
     return _backend.list(prefix);
   }
 
   @override
-  Result<Stream<Scroll>> watch(String pattern) {
+  NineResult<Stream<Scroll>> watch(String pattern) {
     if (_closed) return const Err(ClosedError());
 
     final validation = validatePath(pattern);
@@ -337,7 +349,7 @@ class Store implements Namespace {
   }
 
   @override
-  Result<void> close() {
+  NineResult<void> close() {
     _closed = true;
     _changes.close();
     _backend.close();
@@ -354,7 +366,7 @@ class Store implements Namespace {
   }
 
   /// Create an anchor (checkpoint)
-  Result<Anchor> anchor(String path, {String? label}) {
+  NineResult<Anchor> anchor(String path, {String? label}) {
     if (!_history) {
       return const Err(UnavailableError('History not enabled for this store'));
     }
@@ -366,7 +378,13 @@ class Store implements Namespace {
     }
 
     final anchorObj = createAnchor(scrollResult.value!, label: label);
-    _anchors.putIfAbsent(path, () => []).add(anchorObj);
+    final anchors = _anchors.putIfAbsent(path, () => []);
+    anchors.add(anchorObj);
+
+    // Prune old anchors if over limit
+    if (anchors.length > _maxAnchors) {
+      anchors.removeRange(0, anchors.length - _maxAnchors);
+    }
 
     return Ok(anchorObj);
   }
@@ -377,7 +395,7 @@ class Store implements Namespace {
   }
 
   /// Restore to an anchor
-  Result<Scroll> restore(String path, String anchorId) {
+  NineResult<Scroll> restore(String path, String anchorId) {
     final pathAnchors = _anchors[path] ?? [];
     final anchorObj = pathAnchors.where((a) => a.id == anchorId).firstOrNull;
 
@@ -405,7 +423,7 @@ class Store implements Namespace {
   /// final v2 = store.stateAt('/doc', 2);
   /// print(v2.value?.data['v']);  // 2
   /// ```
-  Result<Scroll> stateAt(String path, int seq) {
+  NineResult<Scroll> stateAt(String path, int seq) {
     final patches = history(path);
 
     if (patches.isEmpty) {
@@ -423,12 +441,10 @@ class Store implements Namespace {
 
     for (var i = 0; i < seq; i++) {
       final patchResult = applyPatch(current, patches[i]);
-      switch (patchResult) {
-        case PatchOk(:final value):
-          current = value;
-        case PatchErr(:final error):
-          return Err(InternalError('Failed to apply patch: $error'));
+      if (patchResult.isErr) {
+        return Err(InternalError('Failed to apply patch: ${patchResult.errorOrNull}'));
       }
+      current = patchResult.value;
     }
 
     return Ok(current);
@@ -438,29 +454,46 @@ class Store implements Namespace {
   // INTERNAL: ENCRYPTION
   // ===========================================================================
 
-  Result<Scroll?> _decrypt(Scroll scroll) {
+  NineResult<Scroll?> _decrypt(Scroll scroll) {
     try {
-      // Data is stored as base64 encoded encrypted bytes
+      // Format 1: Dart format - single base64 blob (nonce + ciphertext + tag)
       final encryptedB64 = scroll.data['_encrypted'] as String?;
-      if (encryptedB64 == null) {
-        // Not encrypted, return as-is
-        return Ok(scroll);
+      if (encryptedB64 != null) {
+        final encrypted = base64Decode(encryptedB64);
+        final decrypted = utils.decrypt(_key!, Uint8List.fromList(encrypted));
+        if (decrypted == null) {
+          return const Err(InternalError('Decryption failed'));
+        }
+        final data = jsonDecode(utf8.decode(decrypted)) as Map<String, dynamic>;
+        return Ok(scroll.copyWith(data: data));
       }
 
-      final encrypted = base64Decode(encryptedB64);
-      final decrypted = utils.decrypt(_key!, Uint8List.fromList(encrypted));
-      if (decrypted == null) {
-        return const Err(InternalError('Decryption failed'));
+      // Format 2: Rust SealedValue format - separate nonce and ciphertext
+      final ciphertext = scroll.data['ciphertext'] as String?;
+      final nonce = scroll.data['nonce'] as String?;
+      if (ciphertext != null && nonce != null) {
+        final nonceBytes = base64Decode(nonce);
+        final ciphertextBytes = base64Decode(ciphertext);
+        // Combine nonce + ciphertext (Rust format: ciphertext includes auth tag)
+        final combined = Uint8List(nonceBytes.length + ciphertextBytes.length);
+        combined.setAll(0, nonceBytes);
+        combined.setAll(nonceBytes.length, ciphertextBytes);
+        final decrypted = utils.decrypt(_key!, combined);
+        if (decrypted == null) {
+          return const Err(InternalError('Decryption failed (Rust format)'));
+        }
+        final data = jsonDecode(utf8.decode(decrypted)) as Map<String, dynamic>;
+        return Ok(scroll.copyWith(data: data));
       }
 
-      final data = jsonDecode(utf8.decode(decrypted)) as Map<String, dynamic>;
-      return Ok(scroll.copyWith(data: data));
+      // Not encrypted, return as-is
+      return Ok(scroll);
     } catch (e) {
       return Err(InternalError('Decrypt failed: $e'));
     }
   }
 
-  Result<Scroll?> _encrypt(Scroll scroll) {
+  NineResult<Scroll?> _encrypt(Scroll scroll) {
     try {
       final plaintext = utf8.encode(jsonEncode(scroll.data));
       final encrypted = utils.encrypt(_key!, Uint8List.fromList(plaintext));
@@ -478,6 +511,53 @@ class Store implements Namespace {
 
   void _trackPatch(String path, Scroll? old, Scroll current) {
     final patch = createPatch(path, old, current);
-    _patches.putIfAbsent(path, () => []).add(patch);
+    final patches = _patches.putIfAbsent(path, () => []);
+    patches.add(patch);
+
+    // Prune old patches if over limit
+    if (patches.length > _maxPatches) {
+      patches.removeRange(0, patches.length - _maxPatches);
+    }
+  }
+
+  /// Prune history for a specific path
+  ///
+  /// Keeps only the most recent `keepPatches` patches and `keepAnchors` anchors.
+  void pruneHistory(String path, {int? keepPatches, int? keepAnchors}) {
+    final maxP = keepPatches ?? _maxPatches;
+    final maxA = keepAnchors ?? _maxAnchors;
+
+    final patches = _patches[path];
+    if (patches != null && patches.length > maxP) {
+      patches.removeRange(0, patches.length - maxP);
+    }
+
+    final anchors = _anchors[path];
+    if (anchors != null && anchors.length > maxA) {
+      anchors.removeRange(0, anchors.length - maxA);
+    }
+  }
+
+  /// Prune all history across all paths
+  ///
+  /// Keeps only the most recent patches and anchors per path.
+  void pruneAllHistory({int? keepPatches, int? keepAnchors}) {
+    for (final path in _patches.keys.toList()) {
+      pruneHistory(path, keepPatches: keepPatches, keepAnchors: keepAnchors);
+    }
+  }
+
+  /// Get total memory usage estimate for history
+  ///
+  /// Returns approximate number of entries (patches + anchors) stored.
+  int get historySize {
+    var total = 0;
+    for (final patches in _patches.values) {
+      total += patches.length;
+    }
+    for (final anchors in _anchors.values) {
+      total += anchors.length;
+    }
+    return total;
   }
 }

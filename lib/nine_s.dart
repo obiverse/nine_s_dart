@@ -56,25 +56,33 @@
 /// The five operations are frozen forever.
 library nine_s;
 
-// Core
-export 'src/scroll.dart';
-export 'src/metadata.dart';
-export 'src/namespace.dart';
-export 'src/kernel.dart';
+// Core - The Five Frozen Operations
+export 'src/scroll/scroll.dart';
+export 'src/scroll/metadata.dart';
+export 'src/namespace/namespace.dart';
+export 'src/kernel/kernel.dart';
 
 // Utils
-export 'src/utils.dart';
+export 'src/utils/utils.dart';
+
+// Async - CSP (Isolates) + Rx (Streams) Primitives
+export 'src/async/isolate_pool.dart';
+export 'src/async/stream_utils.dart';
 
 // Advanced Features
-export 'src/patch.dart';
-export 'src/anchor.dart';
-export 'src/sealed.dart';
+export 'src/patch/patch.dart';
+export 'src/anchor/anchor.dart';
+export 'src/sealed/sealed.dart';
 
 // Store - Universal Storage Abstraction
 // Store.memory() for RAM, Store.open() for file-backed
 // Encrypted by default when key provided (backward compatible)
 export 'src/store/store.dart' show Store;
 
-// Backends
+// Backends - Namespace Implementations
 export 'src/backends/memory.dart';
 export 'src/backends/file.dart';
+
+// Networking - dial/listen for Remote Namespaces
+// Call initNetworking() once on startup to register transports
+export 'src/net/net.dart';

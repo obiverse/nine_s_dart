@@ -225,7 +225,7 @@ Future<void> demonstrateResultPattern() async {
   // DART IDIOM: sealed classes enable exhaustive pattern matching
   // The compiler knows all subtypes, so it warns if you miss a case
 
-  void handleResult(Result<Scroll?> result) {
+  void handleResult(NineResult<Scroll?> result) {
     // Exhaustive switch - compiler ensures all cases are handled
     switch (result) {
       case Ok(:final value):

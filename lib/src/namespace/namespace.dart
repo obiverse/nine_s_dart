@@ -21,7 +21,11 @@
 /// were universal law." Every namespace must follow this interface exactly.
 library;
 
-import 'scroll.dart';
+import '../result/result.dart';
+import '../scroll/scroll.dart';
+
+// Re-export Result for convenience
+export '../result/result.dart';
 
 /// Error types for 9S operations
 ///
@@ -90,106 +94,11 @@ class InternalError extends NineError {
   const InternalError(super.message);
 }
 
-/// Result type for namespace operations
+/// Type alias for 9S namespace operations
 ///
-/// ## Dart Lesson: Result Types vs Exceptions
-///
-/// Dart uses exceptions for error handling, but Result types are clearer:
-///
-/// ```dart
-/// // Exception style
-/// try {
-///   final scroll = ns.read('/path');
-/// } on NotFoundError catch (e) {
-///   // handle
-/// }
-///
-/// // Result style (what we use)
-/// final result = ns.read('/path');
-/// switch (result) {
-///   case Ok(:final value): print(value);
-///   case Err(:final error): print(error);
-/// }
-/// ```
-///
-/// Result types make errors explicit in the type signature.
-sealed class Result<T> {
-  const Result();
-
-  /// True if operation succeeded
-  bool get isOk => this is Ok<T>;
-
-  /// True if operation failed
-  bool get isErr => this is Err<T>;
-
-  /// Get value or throw if error
-  T get value {
-    return switch (this) {
-      Ok(:final value) => value,
-      Err(:final error) => throw error,
-    };
-  }
-
-  /// Get value or null if error
-  T? get valueOrNull {
-    return switch (this) {
-      Ok(:final value) => value,
-      Err() => null,
-    };
-  }
-
-  /// Get error or null if success
-  NineError? get errorOrNull {
-    return switch (this) {
-      Ok() => null,
-      Err(:final error) => error,
-    };
-  }
-
-  /// Map the success value
-  Result<U> map<U>(U Function(T) f) {
-    return switch (this) {
-      Ok(:final value) => Ok(f(value)),
-      Err(:final error) => Err(error),
-    };
-  }
-
-  /// Chain operations that return Result
-  Result<U> flatMap<U>(Result<U> Function(T) f) {
-    return switch (this) {
-      Ok(:final value) => f(value),
-      Err(:final error) => Err(error),
-    };
-  }
-}
-
-/// Success case
-class Ok<T> extends Result<T> {
-  @override
-  final T value;
-  const Ok(this.value);
-
-  @override
-  String toString() => 'Ok($value)';
-}
-
-/// Error case
-class Err<T> extends Result<T> {
-  final NineError error;
-  const Err(this.error);
-
-  @override
-  String toString() => 'Err($error)';
-}
-
-/// Convenience constructors
-extension ResultExtensions<T> on T {
-  Result<T> get ok => Ok(this);
-}
-
-extension NineErrorExtensions on NineError {
-  Result<T> err<T>() => Err<T>(this);
-}
+/// All namespace operations return `NineResult<T>` which is
+/// `Result<T, NineError>`.
+typedef NineResult<T> = Result<T, NineError>;
 
 /// Namespace - The 5 frozen operations
 ///
@@ -235,24 +144,24 @@ abstract interface class Namespace {
   ///
   /// Not-found is a valid result, not an error. You're asking
   /// "what's at this path?" and "nothing" is a valid answer.
-  Result<Scroll?> read(String path);
+  NineResult<Scroll?> read(String path);
 
   /// Write data at a path
   ///
   /// Creates or updates the Scroll at path.
   /// Returns the written Scroll with computed metadata (hash, version, time).
-  Result<Scroll> write(String path, Map<String, dynamic> data);
+  NineResult<Scroll> write(String path, Map<String, dynamic> data);
 
   /// Write a full scroll (with type hint)
   ///
   /// The type in scroll is preserved.
   /// Hash, version, and time are computed by the namespace.
-  Result<Scroll> writeScroll(Scroll scroll);
+  NineResult<Scroll> writeScroll(Scroll scroll);
 
   /// List all paths under a prefix
   ///
   /// Returns empty list if no matches (NOT an error).
-  Result<List<String>> list(String prefix);
+  NineResult<List<String>> list(String prefix);
 
   /// Watch for changes matching a pattern
   ///
@@ -271,14 +180,14 @@ abstract interface class Namespace {
   /// ```
   ///
   /// Unlike Rust channels, Dart streams are lazy (nothing happens until listen).
-  Result<Stream<Scroll>> watch(String pattern);
+  NineResult<Stream<Scroll>> watch(String pattern);
 
   /// Close the namespace and release resources
   ///
   /// Cancels all active watches (streams close).
   /// Subsequent operations return `Err(ClosedError())`.
   /// Idempotent - safe to call multiple times.
-  Result<void> close();
+  NineResult<void> close();
 }
 
 // ============================================================================
@@ -296,7 +205,7 @@ abstract interface class Namespace {
 ///
 /// Dart uses Perl-style regex. The `r''` prefix creates a raw string
 /// (no escape processing), which is cleaner for regex patterns.
-Result<void> validatePath(String path) {
+NineResult<void> validatePath(String path) {
   if (path.isEmpty) {
     return const Err(InvalidPathError('path cannot be empty'));
   }

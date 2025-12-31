@@ -13,25 +13,13 @@
 /// 1. Streams are lazy (no work until listened)
 /// 2. Streams can be broadcast (multiple listeners)
 /// 3. Streams integrate with async/await naturally
-///
-/// ## Dart Lesson: Finalizer for GC-Aware Cleanup
-///
-/// Dart 2.17+ provides `Finalizer` and `WeakReference` for GC integration:
-///
-/// - `Finalizer<T>` - Runs a callback when an object is garbage collected
-/// - `WeakReference<T>` - Holds a reference without preventing GC
-///
-/// This enables "release when forgotten" semantics - if user code drops all
-/// references to a watch stream, the watcher cleans itself up automatically.
 library;
 
 import 'dart:async';
 
-import '../namespace.dart';
-import '../scroll.dart';
-
-/// Maximum number of concurrent watchers
-const _maxWatchers = 1024;
+import '../namespace/namespace.dart';
+import '../scroll/scroll.dart';
+import '../watch/watcher.dart';
 
 /// MemoryNamespace - In-memory implementation
 ///
@@ -49,8 +37,8 @@ class MemoryNamespace implements Namespace {
   /// Dart can often infer types, but explicit is clearer for class fields.
   final Map<String, Scroll> _store = {};
 
-  /// Active watchers
-  final List<_Watcher> _watchers = [];
+  /// Active watchers (using shared Watcher class)
+  final List<Watcher<Scroll>> _watchers = [];
 
   /// Closed flag
   bool _closed = false;
@@ -59,45 +47,16 @@ class MemoryNamespace implements Namespace {
   MemoryNamespace();
 
   /// Check if closed
-  Result<void> _checkClosed() {
+  NineResult<void> _checkClosed() {
     if (_closed) return const Err(ClosedError());
     return const Ok(null);
   }
 
   /// Notify all watchers of a change
   ///
-  /// ## Dart Lesson: Synchronous vs Async Notification
-  ///
-  /// We use synchronous notification (StreamController.add is sync).
-  /// The watchers' handlers run in microtasks, so writes don't block.
-  ///
-  /// This is different from Rust's try_send which returns immediately.
-  /// In Dart, the event is queued and processed in the next microtask.
-  ///
-  /// ## GC-Aware Cleanup
-  ///
-  /// We check `isDead` which includes WeakReference check. If user code
-  /// has dropped all references to the stream, GC will collect it and
-  /// we clean up automatically - no explicit cancel needed.
+  /// Uses the shared notifyWatchers helper which also cleans up dead watchers.
   void _notifyWatchers(Scroll scroll) {
-    // Remove dead watchers (closed OR garbage collected)
-    _watchers.removeWhere((w) {
-      if (w.isDead) {
-        // Ensure controller is closed to release resources
-        if (!w.controller.isClosed) {
-          w.controller.close();
-        }
-        return true;
-      }
-      return false;
-    });
-
-    // Notify matching watchers
-    for (final watcher in _watchers) {
-      if (pathMatches(scroll.key, watcher.pattern)) {
-        watcher.controller.add(scroll);
-      }
-    }
+    notifyWatchers(_watchers, scroll.key, scroll);
   }
 
   // ============================================================================
@@ -105,7 +64,7 @@ class MemoryNamespace implements Namespace {
   // ============================================================================
 
   @override
-  Result<Scroll?> read(String path) {
+  NineResult<Scroll?> read(String path) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -116,7 +75,7 @@ class MemoryNamespace implements Namespace {
   }
 
   @override
-  Result<Scroll> write(String path, Map<String, dynamic> data) {
+  NineResult<Scroll> write(String path, Map<String, dynamic> data) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -151,7 +110,7 @@ class MemoryNamespace implements Namespace {
   }
 
   @override
-  Result<Scroll> writeScroll(Scroll scroll) {
+  NineResult<Scroll> writeScroll(Scroll scroll) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -184,7 +143,7 @@ class MemoryNamespace implements Namespace {
   }
 
   @override
-  Result<List<String>> list(String prefix) {
+  NineResult<List<String>> list(String prefix) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -200,7 +159,7 @@ class MemoryNamespace implements Namespace {
   }
 
   @override
-  Result<Stream<Scroll>> watch(String pattern) {
+  NineResult<Stream<Scroll>> watch(String pattern) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -208,38 +167,25 @@ class MemoryNamespace implements Namespace {
     if (validation.isErr) return Err(validation.errorOrNull!);
 
     // Check watcher limit (also cleanup dead watchers)
-    _watchers.removeWhere((w) => w.isDead);
-    if (_watchers.length >= _maxWatchers) {
+    cleanupDeadWatchers(_watchers);
+    if (_watchers.length >= maxWatchers) {
       return const Err(UnavailableError('too many watchers'));
     }
 
     // Create stream controller
-    ///
-    /// ## Dart Lesson: Broadcast Streams
-    ///
-    /// `StreamController.broadcast()` allows multiple listeners.
-    /// Regular controllers only allow one listener.
-    ///
-    /// For 9S, we use regular controllers (one watcher = one stream).
-    /// If you needed multiple listeners on the same pattern, use broadcast.
-    final controller = StreamController<Scroll>(
-      onCancel: () {
-        // Controller will be removed on next write via removeWhere
-      },
-    );
-
-    _watchers.add(_Watcher(pattern: pattern, controller: controller));
+    final controller = StreamController<Scroll>();
+    _watchers.add(Watcher(pattern: pattern, controller: controller));
 
     return Ok(controller.stream);
   }
 
   @override
-  Result<void> close() {
+  NineResult<void> close() {
     _closed = true;
 
     // Close all watchers
     for (final watcher in _watchers) {
-      watcher.controller.close();
+      watcher.close();
     }
     _watchers.clear();
 
@@ -258,34 +204,4 @@ class MemoryNamespace implements Namespace {
 
   /// Clear all data (but keep watchers)
   void clear() => _store.clear();
-}
-
-/// Internal watcher state with GC-aware cleanup
-///
-/// ## Dart Lesson: WeakReference for GC Integration
-///
-/// We hold a WeakReference to the Stream. When user code drops all references
-/// to the stream, it becomes eligible for GC. On the next `_notifyWatchers`
-/// call, we detect `target == null` and clean up.
-///
-/// This is more efficient than checking `controller.isClosed` because:
-/// 1. User doesn't need to explicitly cancel/close
-/// 2. GC handles cleanup automatically when stream is forgotten
-/// 3. No memory leaks from abandoned watchers
-class _Watcher {
-  final String pattern;
-  final StreamController<Scroll> controller;
-
-  /// Weak reference to the stream - allows GC to collect if user drops it
-  final WeakReference<Stream<Scroll>> streamRef;
-
-  _Watcher({required this.pattern, required this.controller})
-      : streamRef = WeakReference(controller.stream);
-
-  /// Check if this watcher is still alive
-  ///
-  /// A watcher is dead if:
-  /// 1. The controller is closed, OR
-  /// 2. The stream has been garbage collected (user dropped all references)
-  bool get isDead => controller.isClosed || streamRef.target == null;
 }

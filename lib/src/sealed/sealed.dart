@@ -41,7 +41,8 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:pointycastle/export.dart';
 
-import 'scroll.dart';
+import '../result/result.dart';
+import '../scroll/scroll.dart';
 
 /// Maximum content size for sealed scrolls (64 KB)
 /// Larger content should be chunked or stored differently
@@ -223,23 +224,8 @@ class ContentTooLargeError extends SealError {
 
 /// Result type for seal/unseal operations
 ///
-/// ## Dart Lesson: Result Pattern
-///
-/// Rather than throwing exceptions, we return a Result type.
-/// This makes error handling explicit and type-safe.
-sealed class SealResult<T> {
-  const SealResult();
-}
-
-class SealOk<T> extends SealResult<T> {
-  final T value;
-  const SealOk(this.value);
-}
-
-class SealErr<T> extends SealResult<T> {
-  final SealError error;
-  const SealErr(this.error);
-}
+/// Uses the unified Result<T, E> type with SealError as the error type.
+typedef SealResult<T> = Result<T, SealError>;
 
 // ============================================================================
 // Pure Functions for Seal/Unseal
@@ -265,7 +251,7 @@ SealResult<SealedScroll> sealScroll(Scroll scroll, {String? password}) {
     final scrollJson = jsonEncode(scroll.toJson());
 
     if (scrollJson.length > maxSealedSize) {
-      return const SealErr(ContentTooLargeError(
+      return const Err(ContentTooLargeError(
           'Scroll exceeds maximum sealed size of $maxSealedSize bytes'));
     }
 
@@ -298,9 +284,9 @@ SealResult<SealedScroll> sealScroll(Scroll scroll, {String? password}) {
       scrollType: scroll.type_,
     );
 
-    return SealOk(sealed);
+    return Ok(sealed);
   } catch (e) {
-    return SealErr(EncryptionError('Failed to seal: $e'));
+    return Err(EncryptionError('Failed to seal: $e'));
   }
 }
 
@@ -317,7 +303,7 @@ SealResult<SealedScroll> sealScroll(Scroll scroll, {String? password}) {
 SealResult<Scroll> unsealScroll(SealedScroll sealed, {String? password}) {
   try {
     if (sealed.version != _sealedVersion) {
-      return SealErr(
+      return Err(
           InvalidFormatError('Unsupported sealed version: ${sealed.version}'));
     }
 
@@ -326,12 +312,12 @@ SealResult<Scroll> unsealScroll(SealedScroll sealed, {String? password}) {
 
     if (sealed.hasPassword) {
       if (password == null || password.isEmpty) {
-        return const SealErr(
+        return const Err(
             DecryptionError('Password required but not provided'));
       }
 
       if (sealed.salt == null) {
-        return const SealErr(
+        return const Err(
             InvalidFormatError('Password-protected scroll missing salt'));
       }
 
@@ -352,7 +338,7 @@ SealResult<Scroll> unsealScroll(SealedScroll sealed, {String? password}) {
     );
 
     if (plaintext == null) {
-      return const SealErr(
+      return const Err(
           DecryptionError('Decryption failed - wrong password or corrupted data'));
     }
 
@@ -361,12 +347,12 @@ SealResult<Scroll> unsealScroll(SealedScroll sealed, {String? password}) {
     final scroll =
         Scroll.fromJson(jsonDecode(scrollJson) as Map<String, dynamic>);
 
-    return SealOk(scroll);
+    return Ok(scroll);
   } catch (e) {
     if (e is SealError) {
-      return SealErr(e);
+      return Err(e);
     }
-    return SealErr(DecryptionError('Failed to unseal: $e'));
+    return Err(DecryptionError('Failed to unseal: $e'));
   }
 }
 

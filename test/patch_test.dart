@@ -97,9 +97,9 @@ void main() {
 
   group('Patch', () {
     test('serializes and deserializes correctly', () {
-      final patch = Patch(
+      const patch = Patch(
         key: '/test/scroll',
-        ops: const [
+        ops: [
           AddOp(path: '/name', value: 'test'),
           ReplaceOp(path: '/count', value: 42),
         ],
@@ -121,9 +121,9 @@ void main() {
     });
 
     test('copyWith creates modified copy', () {
-      final original = Patch(
+      const original = Patch(
         key: '/test',
-        ops: const [],
+        ops: [],
         hash: 'abc',
         timestamp: 100,
         seq: 1,
@@ -177,9 +177,9 @@ void main() {
   group('applyPatch', () {
     test('applies add operation', () {
       final scroll = Scroll.create('/test', {'existing': 1});
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [AddOp(path: '/new', value: 42)],
+        ops: [AddOp(path: '/new', value: 42)],
         hash: 'abc',
         timestamp: 100,
         seq: 1,
@@ -187,17 +187,17 @@ void main() {
 
       final result = applyPatch(scroll, patch);
 
-      expect(result, isA<PatchOk<Scroll>>());
-      final applied = (result as PatchOk<Scroll>).value;
+      expect(result.isOk, isTrue);
+      final applied = result.value;
       expect(applied.data['new'], equals(42));
       expect(applied.data['existing'], equals(1));
     });
 
     test('applies remove operation', () {
       final scroll = Scroll.create('/test', {'a': 1, 'b': 2});
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [RemoveOp(path: '/b')],
+        ops: [RemoveOp(path: '/b')],
         hash: 'abc',
         timestamp: 100,
         seq: 1,
@@ -205,17 +205,17 @@ void main() {
 
       final result = applyPatch(scroll, patch);
 
-      expect(result, isA<PatchOk<Scroll>>());
-      final applied = (result as PatchOk<Scroll>).value;
+      expect(result.isOk, isTrue);
+      final applied = result.value;
       expect(applied.data.containsKey('b'), isFalse);
       expect(applied.data['a'], equals(1));
     });
 
     test('applies replace operation', () {
       final scroll = Scroll.create('/test', {'value': 'old'});
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [ReplaceOp(path: '/value', value: 'new')],
+        ops: [ReplaceOp(path: '/value', value: 'new')],
         hash: 'abc',
         timestamp: 100,
         seq: 1,
@@ -223,16 +223,16 @@ void main() {
 
       final result = applyPatch(scroll, patch);
 
-      expect(result, isA<PatchOk<Scroll>>());
-      final applied = (result as PatchOk<Scroll>).value;
+      expect(result.isOk, isTrue);
+      final applied = result.value;
       expect(applied.data['value'], equals('new'));
     });
 
     test('test operation fails on mismatch', () {
       final scroll = Scroll.create('/test', {'value': 'actual'});
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [TestOp(path: '/value', value: 'expected')],
+        ops: [TestOp(path: '/value', value: 'expected')],
         hash: 'abc',
         timestamp: 100,
         seq: 1,
@@ -240,15 +240,15 @@ void main() {
 
       final result = applyPatch(scroll, patch);
 
-      expect(result, isA<PatchErr<Scroll>>());
-      expect((result as PatchErr<Scroll>).error, isA<TestFailedError>());
+      expect(result.isErr, isTrue);
+      expect(result.errorOrNull, isA<TestFailedError>());
     });
 
     test('test operation succeeds on match', () {
       final scroll = Scroll.create('/test', {'value': 'expected'});
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [TestOp(path: '/value', value: 'expected')],
+        ops: [TestOp(path: '/value', value: 'expected')],
         hash: 'abc',
         timestamp: 100,
         seq: 1,
@@ -256,16 +256,16 @@ void main() {
 
       final result = applyPatch(scroll, patch);
 
-      expect(result, isA<PatchOk<Scroll>>());
+      expect(result.isOk, isTrue);
     });
 
     test('applies nested path operations', () {
       final scroll = Scroll.create('/test', {
         'nested': {'a': 1, 'b': 2}
       });
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [
+        ops: [
           ReplaceOp(path: '/nested/a', value: 100),
           AddOp(path: '/nested/c', value: 3),
         ],
@@ -276,11 +276,12 @@ void main() {
 
       final result = applyPatch(scroll, patch);
 
-      expect(result, isA<PatchOk<Scroll>>());
-      final applied = (result as PatchOk<Scroll>).value;
-      expect(applied.data['nested']['a'], equals(100));
-      expect(applied.data['nested']['b'], equals(2));
-      expect(applied.data['nested']['c'], equals(3));
+      expect(result.isOk, isTrue);
+      final applied = result.value;
+      final nested = applied.data['nested'] as Map<String, dynamic>;
+      expect(nested['a'], equals(100));
+      expect(nested['b'], equals(2));
+      expect(nested['c'], equals(3));
     });
   });
 
@@ -315,9 +316,9 @@ void main() {
 
     test('rejects patch with wrong parent', () {
       final old = Scroll.create('/test', {'value': 1});
-      final patch = Patch(
+      const patch = Patch(
         key: '/test',
-        ops: const [],
+        ops: [],
         parent: 'wrong-hash',
         hash: 'new-hash',
         timestamp: 100,

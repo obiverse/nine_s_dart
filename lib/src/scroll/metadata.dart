@@ -264,6 +264,15 @@ class Metadata {
         if (extensions.isNotEmpty) ...extensions,
       };
 
+  /// Parse an int from various input types (int, String, null)
+  static int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value);
+    if (value is double) return value.toInt();
+    return null;
+  }
+
   /// Create from JSON map
   factory Metadata.fromJson(Map<String, dynamic> json) {
     // Separate known fields from extensions
@@ -292,20 +301,20 @@ class Metadata {
     }
 
     return Metadata(
-      createdAt: json['createdAt'] as int?,
-      updatedAt: json['updatedAt'] as int?,
-      syncedAt: json['syncedAt'] as int?,
-      expiresAt: json['expiresAt'] as int?,
+      createdAt: _parseInt(json['createdAt']),
+      updatedAt: _parseInt(json['updatedAt']),
+      syncedAt: _parseInt(json['syncedAt']),
+      expiresAt: _parseInt(json['expiresAt']),
       deleted: json['deleted'] as bool?,
-      version: json['version'] as int? ?? 0,
-      hash: json['hash'] as String?,
-      subject: json['subject'] as String?,
-      verb: json['verb'] as String?,
-      object: json['object'] as String?,
-      tense: Tense.fromJson(json['tense'] as String?),
-      kingdom: json['kingdom'] as String?,
-      phylum: json['phylum'] as String?,
-      class_: json['class'] as String?,
+      version: _parseInt(json['version']) ?? 0,
+      hash: json['hash']?.toString(),
+      subject: json['subject']?.toString(),
+      verb: json['verb']?.toString(),
+      object: json['object']?.toString(),
+      tense: Tense.fromJson(json['tense']?.toString()),
+      kingdom: json['kingdom']?.toString(),
+      phylum: json['phylum']?.toString(),
+      class_: json['class']?.toString(),
       extensions: extensions,
     );
   }

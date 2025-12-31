@@ -28,8 +28,9 @@
 /// knows all cases and warns if you miss one in a switch.
 library;
 
-import 'scroll.dart';
-import 'utils.dart' show deepEquals, deepCopyMap;
+import '../result/result.dart';
+import '../scroll/scroll.dart';
+import '../utils/utils.dart' show deepEquals, deepCopyMap;
 
 /// A single JSON Patch operation (RFC 6902)
 ///
@@ -254,19 +255,9 @@ class InvalidPointerError extends PatchError {
 }
 
 /// Result type for patch operations
-sealed class PatchResult<T> {
-  const PatchResult();
-}
-
-class PatchOk<T> extends PatchResult<T> {
-  final T value;
-  const PatchOk(this.value);
-}
-
-class PatchErr<T> extends PatchResult<T> {
-  final PatchError error;
-  const PatchErr(this.error);
-}
+///
+/// Uses the unified Result<T, E> type with PatchError as the error type.
+typedef PatchResult<T> = Result<T, PatchError>;
 
 // ============================================================================
 // Pure Diff Functions
@@ -299,10 +290,10 @@ PatchResult<Scroll> applyPatch(Scroll scroll, Patch patch) {
 
   for (final op in patch.ops) {
     final result = _applyOp(newData, op);
-    if (result is PatchErr) {
-      return PatchErr((result as PatchErr).error);
+    if (result.isErr) {
+      return Err(result.errorOrNull!);
     }
-    newData = (result as PatchOk<Map<String, dynamic>>).value;
+    newData = result.value;
   }
 
   final result = Scroll(
@@ -312,7 +303,7 @@ PatchResult<Scroll> applyPatch(Scroll scroll, Patch patch) {
     metadata: scroll.metadata.copyWith(version: patch.seq),
   );
 
-  return PatchOk(result);
+  return Ok(result);
 }
 
 /// Verify a patch's hash chain
@@ -401,26 +392,26 @@ PatchResult<Map<String, dynamic>> _applyOp(Map<String, dynamic> data, PatchOp op
   try {
     switch (op) {
       case AddOp(:final path, :final value):
-        return PatchOk(_setAtPointer(data, path, value, mustExist: false));
+        return Ok(_setAtPointer(data, path, value, mustExist: false));
       case RemoveOp(:final path):
-        return PatchOk(_removeAtPointer(data, path).$1);
+        return Ok(_removeAtPointer(data, path).$1);
       case ReplaceOp(:final path, :final value):
-        return PatchOk(_setAtPointer(data, path, value, mustExist: true));
+        return Ok(_setAtPointer(data, path, value, mustExist: true));
       case MoveOp(:final from, :final path):
         final (newData, removed) = _removeAtPointer(data, from);
-        return PatchOk(_setAtPointer(newData, path, removed, mustExist: false));
+        return Ok(_setAtPointer(newData, path, removed, mustExist: false));
       case CopyOp(:final from, :final path):
         final value = _getAtPointer(data, from);
-        return PatchOk(_setAtPointer(data, path, value, mustExist: false));
+        return Ok(_setAtPointer(data, path, value, mustExist: false));
       case TestOp(:final path, :final value):
         final actual = _getAtPointer(data, path);
         if (!deepEquals(actual, value)) {
-          return PatchErr(TestFailedError('expected $value, got $actual'));
+          return Err(TestFailedError('expected $value, got $actual'));
         }
-        return PatchOk(data);
+        return Ok(data);
     }
   } on PatchError catch (e) {
-    return PatchErr(e);
+    return Err(e);
   }
 }
 

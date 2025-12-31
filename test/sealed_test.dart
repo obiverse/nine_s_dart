@@ -139,8 +139,8 @@ void main() {
       final scroll = Scroll.create('/test', {'secret': 'data'});
       final result = sealScroll(scroll);
 
-      expect(result, isA<SealOk<SealedScroll>>());
-      final sealed = (result as SealOk<SealedScroll>).value;
+      expect(result.isOk, isTrue);
+      final sealed = result.value;
 
       expect(sealed.hasPassword, isFalse);
       expect(sealed.salt, isNull);
@@ -151,8 +151,8 @@ void main() {
       final scroll = Scroll.create('/test', {'secret': 'data'});
       final result = sealScroll(scroll, password: 'mypassword');
 
-      expect(result, isA<SealOk<SealedScroll>>());
-      final sealed = (result as SealOk<SealedScroll>).value;
+      expect(result.isOk, isTrue);
+      final sealed = result.value;
 
       expect(sealed.hasPassword, isTrue);
       expect(sealed.salt, isNotNull);
@@ -162,8 +162,8 @@ void main() {
       final scroll = Scroll.typed('/vault/note', {'title': 'Secret'}, 'vault/note@v1');
       final result = sealScroll(scroll);
 
-      expect(result, isA<SealOk<SealedScroll>>());
-      final sealed = (result as SealOk<SealedScroll>).value;
+      expect(result.isOk, isTrue);
+      final sealed = result.value;
       expect(sealed.scrollType, equals('vault/note@v1'));
     });
 
@@ -173,7 +173,7 @@ void main() {
       final result = sealScroll(scroll);
       final after = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
-      final sealed = (result as SealOk<SealedScroll>).value;
+      final sealed = result.value;
       expect(sealed.sealedAt, greaterThanOrEqualTo(before));
       expect(sealed.sealedAt, lessThanOrEqualTo(after));
     });
@@ -183,12 +183,12 @@ void main() {
     test('unseals scroll without password', () {
       final original = Scroll.create('/test', {'key': 'value'});
       final sealResult = sealScroll(original);
-      final sealed = (sealResult as SealOk<SealedScroll>).value;
+      final sealed = sealResult.value;
 
       final unsealResult = unsealScroll(sealed);
 
-      expect(unsealResult, isA<SealOk<Scroll>>());
-      final recovered = (unsealResult as SealOk<Scroll>).value;
+      expect(unsealResult.isOk, isTrue);
+      final recovered = unsealResult.value;
 
       expect(recovered.key, equals(original.key));
       expect(recovered.data, equals(original.data));
@@ -197,35 +197,35 @@ void main() {
     test('unseals scroll with correct password', () {
       final original = Scroll.create('/test', {'secret': 'data'});
       final sealResult = sealScroll(original, password: 'correct-password');
-      final sealed = (sealResult as SealOk<SealedScroll>).value;
+      final sealed = sealResult.value;
 
       final unsealResult = unsealScroll(sealed, password: 'correct-password');
 
-      expect(unsealResult, isA<SealOk<Scroll>>());
-      final recovered = (unsealResult as SealOk<Scroll>).value;
+      expect(unsealResult.isOk, isTrue);
+      final recovered = unsealResult.value;
       expect(recovered.data, equals(original.data));
     });
 
     test('fails with wrong password', () {
       final original = Scroll.create('/test', {'secret': 'data'});
       final sealResult = sealScroll(original, password: 'correct');
-      final sealed = (sealResult as SealOk<SealedScroll>).value;
+      final sealed = sealResult.value;
 
       final unsealResult = unsealScroll(sealed, password: 'wrong');
 
-      expect(unsealResult, isA<SealErr<Scroll>>());
-      expect((unsealResult as SealErr<Scroll>).error, isA<DecryptionError>());
+      expect(unsealResult.isErr, isTrue);
+      expect(unsealResult.errorOrNull, isA<DecryptionError>());
     });
 
     test('fails when password required but not provided', () {
       final original = Scroll.create('/test', {});
       final sealResult = sealScroll(original, password: 'secret');
-      final sealed = (sealResult as SealOk<SealedScroll>).value;
+      final sealed = sealResult.value;
 
       final unsealResult = unsealScroll(sealed); // No password
 
-      expect(unsealResult, isA<SealErr<Scroll>>());
-      expect((unsealResult as SealErr<Scroll>).error, isA<DecryptionError>());
+      expect(unsealResult.isErr, isTrue);
+      expect(unsealResult.errorOrNull, isA<DecryptionError>());
     });
 
     test('preserves scroll metadata through seal/unseal', () {
@@ -235,10 +235,10 @@ void main() {
           .withVerb('creates');
 
       final sealResult = sealScroll(original, password: 'test123');
-      final sealed = (sealResult as SealOk<SealedScroll>).value;
+      final sealed = sealResult.value;
 
       final unsealResult = unsealScroll(sealed, password: 'test123');
-      final recovered = (unsealResult as SealOk<Scroll>).value;
+      final recovered = unsealResult.value;
 
       expect(recovered.type_, equals(original.type_));
       expect(recovered.metadata.subject, equals(original.metadata.subject));
@@ -252,7 +252,7 @@ void main() {
 
       // Seal
       final sealResult = sealScroll(original, password: 'password123');
-      final sealed = (sealResult as SealOk<SealedScroll>).value;
+      final sealed = sealResult.value;
 
       // Convert to URI
       final uri = sealed.toUri();
@@ -262,7 +262,7 @@ void main() {
 
       // Unseal
       final unsealResult = unsealScroll(parsed, password: 'password123');
-      final recovered = (unsealResult as SealOk<Scroll>).value;
+      final recovered = unsealResult.value;
 
       expect(recovered.key, equals(original.key));
       expect(recovered.data['message'], equals('Hello, World!'));

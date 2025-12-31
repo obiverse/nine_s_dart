@@ -17,11 +17,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import '../namespace.dart';
-import '../scroll.dart';
-
-/// Maximum number of concurrent watchers
-const _maxWatchers = 1024;
+import '../namespace/namespace.dart';
+import '../scroll/scroll.dart';
+import '../watch/watcher.dart';
 
 /// FileNamespace - Filesystem-backed implementation
 ///
@@ -34,8 +32,8 @@ class FileNamespace implements Namespace {
   /// Directory where scrolls are stored
   final Directory _scrollsDir;
 
-  /// Active watchers
-  final List<_Watcher> _watchers = [];
+  /// Active watchers (using shared Watcher class)
+  final List<Watcher<Scroll>> _watchers = [];
 
   /// Closed flag
   bool _closed = false;
@@ -53,31 +51,16 @@ class FileNamespace implements Namespace {
   String get path => _root.path;
 
   /// Check if closed
-  Result<void> _checkClosed() {
+  NineResult<void> _checkClosed() {
     if (_closed) return const Err(ClosedError());
     return const Ok(null);
   }
 
   /// Notify all watchers of a change
   ///
-  /// Uses GC-aware cleanup - see MemoryNamespace for detailed explanation.
+  /// Uses the shared notifyWatchers helper which also cleans up dead watchers.
   void _notifyWatchers(Scroll scroll) {
-    // Remove dead watchers (closed OR garbage collected)
-    _watchers.removeWhere((w) {
-      if (w.isDead) {
-        if (!w.controller.isClosed) {
-          w.controller.close();
-        }
-        return true;
-      }
-      return false;
-    });
-
-    for (final watcher in _watchers) {
-      if (pathMatches(scroll.key, watcher.pattern)) {
-        watcher.controller.add(scroll);
-      }
-    }
+    notifyWatchers(_watchers, scroll.key, scroll);
   }
 
   /// Convert a scroll path to a filesystem path
@@ -103,7 +86,7 @@ class FileNamespace implements Namespace {
   // ============================================================================
 
   @override
-  Result<Scroll?> read(String path) {
+  NineResult<Scroll?> read(String path) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -123,7 +106,7 @@ class FileNamespace implements Namespace {
   }
 
   @override
-  Result<Scroll> write(String path, Map<String, dynamic> data) {
+  NineResult<Scroll> write(String path, Map<String, dynamic> data) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -167,7 +150,7 @@ class FileNamespace implements Namespace {
   }
 
   @override
-  Result<Scroll> writeScroll(Scroll scroll) {
+  NineResult<Scroll> writeScroll(Scroll scroll) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -211,7 +194,7 @@ class FileNamespace implements Namespace {
   }
 
   @override
-  Result<List<String>> list(String prefix) {
+  NineResult<List<String>> list(String prefix) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -239,7 +222,7 @@ class FileNamespace implements Namespace {
   }
 
   @override
-  Result<Stream<Scroll>> watch(String pattern) {
+  NineResult<Stream<Scroll>> watch(String pattern) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -247,30 +230,25 @@ class FileNamespace implements Namespace {
     if (validation.isErr) return Err(validation.errorOrNull!);
 
     // Check watcher limit (also cleanup dead watchers)
-    _watchers.removeWhere((w) => w.isDead);
-    if (_watchers.length >= _maxWatchers) {
+    cleanupDeadWatchers(_watchers);
+    if (_watchers.length >= maxWatchers) {
       return const Err(UnavailableError('too many watchers'));
     }
 
     // Create stream controller
-    final controller = StreamController<Scroll>(
-      onCancel: () {
-        // Controller will be removed on next write via removeWhere
-      },
-    );
-
-    _watchers.add(_Watcher(pattern: pattern, controller: controller));
+    final controller = StreamController<Scroll>();
+    _watchers.add(Watcher(pattern: pattern, controller: controller));
 
     return Ok(controller.stream);
   }
 
   @override
-  Result<void> close() {
+  NineResult<void> close() {
     _closed = true;
 
     // Close all watchers
     for (final watcher in _watchers) {
-      watcher.controller.close();
+      watcher.close();
     }
     _watchers.clear();
 
@@ -285,7 +263,7 @@ class FileNamespace implements Namespace {
   ///
   /// Returns `Ok(true)` if deleted, `Ok(false)` if didn't exist.
   /// Note: This is a convenience method, not part of the frozen 5 operations.
-  Result<bool> delete(String path) {
+  NineResult<bool> delete(String path) {
     final closed = _checkClosed();
     if (closed.isErr) return Err(closed.errorOrNull!);
 
@@ -326,21 +304,4 @@ class FileNamespace implements Namespace {
       _scrollsDir.createSync(recursive: true);
     }
   }
-}
-
-/// Internal watcher state with GC-aware cleanup
-///
-/// See MemoryNamespace for detailed explanation of the WeakReference pattern.
-class _Watcher {
-  final String pattern;
-  final StreamController<Scroll> controller;
-
-  /// Weak reference to the stream - allows GC to collect if user drops it
-  final WeakReference<Stream<Scroll>> streamRef;
-
-  _Watcher({required this.pattern, required this.controller})
-      : streamRef = WeakReference(controller.stream);
-
-  /// Check if this watcher is still alive
-  bool get isDead => controller.isClosed || streamRef.target == null;
 }

@@ -19,8 +19,9 @@ library;
 import 'dart:async';
 import 'dart:collection';
 
-import 'namespace.dart';
-import 'scroll.dart';
+import '../namespace/namespace.dart';
+import '../scroll/scroll.dart';
+import '../watch/watcher.dart';
 
 /// Check if a path matches a mount point on segment boundaries
 ///
@@ -60,8 +61,8 @@ class Kernel implements Namespace {
   /// Here we initialize inline, so it's just documentation that it's set once.
   final SplayTreeMap<String, Namespace> _mounts = SplayTreeMap();
 
-  /// Stream controllers for watch aggregation with GC-aware cleanup
-  final List<_KernelWatcher> _watchControllers = [];
+  /// Stream controllers for watch aggregation (using shared Watcher class)
+  final List<Watcher<Scroll>> _watchControllers = [];
 
   /// Closed flag
   bool _closed = false;
@@ -99,7 +100,7 @@ class Kernel implements Namespace {
   /// Find the namespace and translated path for a given path
   ///
   /// Uses longest prefix match with segment boundary checking.
-  Result<(Namespace, String)> _resolve(String path) {
+  NineResult<(Namespace, String)> _resolve(String path) {
     if (_closed) return const Err(ClosedError());
 
     // Validate path first
@@ -141,7 +142,7 @@ class Kernel implements Namespace {
   // ============================================================================
 
   @override
-  Result<Scroll?> read(String path) {
+  NineResult<Scroll?> read(String path) {
     final resolved = _resolve(path);
     if (resolved.isErr) return Err(resolved.errorOrNull!);
 
@@ -156,7 +157,7 @@ class Kernel implements Namespace {
   }
 
   @override
-  Result<Scroll> write(String path, Map<String, dynamic> data) {
+  NineResult<Scroll> write(String path, Map<String, dynamic> data) {
     final resolved = _resolve(path);
     if (resolved.isErr) return Err(resolved.errorOrNull!);
 
@@ -168,7 +169,7 @@ class Kernel implements Namespace {
   }
 
   @override
-  Result<Scroll> writeScroll(Scroll scroll) {
+  NineResult<Scroll> writeScroll(Scroll scroll) {
     final resolved = _resolve(scroll.key);
     if (resolved.isErr) return Err(resolved.errorOrNull!);
 
@@ -183,7 +184,7 @@ class Kernel implements Namespace {
   }
 
   @override
-  Result<List<String>> list(String prefix) {
+  NineResult<List<String>> list(String prefix) {
     final resolved = _resolve(prefix);
     if (resolved.isErr) return Err(resolved.errorOrNull!);
 
@@ -212,7 +213,7 @@ class Kernel implements Namespace {
   }
 
   @override
-  Result<Stream<Scroll>> watch(String pattern) {
+  NineResult<Stream<Scroll>> watch(String pattern) {
     if (_closed) return const Err(ClosedError());
 
     final resolved = _resolve(pattern);
@@ -224,11 +225,6 @@ class Kernel implements Namespace {
     if (result.isErr) return result;
 
     // Create controller to translate paths back
-    ///
-    /// ## Dart Lesson: StreamController
-    ///
-    /// StreamController is the bridge between imperative and reactive code.
-    /// `onCancel` is called when the last listener unsubscribes.
     late StreamController<Scroll> controller;
     StreamSubscription<Scroll>? subscription;
 
@@ -254,7 +250,7 @@ class Kernel implements Namespace {
       },
     );
 
-    _watchControllers.add(_KernelWatcher(controller: controller));
+    _watchControllers.add(Watcher(pattern: pattern, controller: controller));
     return Ok(controller.stream);
   }
 
@@ -278,12 +274,12 @@ class Kernel implements Namespace {
   }
 
   @override
-  Result<void> close() {
+  NineResult<void> close() {
     _closed = true;
 
     // Close all watch controllers
     for (final watcher in _watchControllers) {
-      watcher.controller.close();
+      watcher.close();
     }
     _watchControllers.clear();
 
@@ -294,20 +290,4 @@ class Kernel implements Namespace {
 
     return const Ok(null);
   }
-}
-
-/// Internal watcher state with GC-aware cleanup for Kernel
-///
-/// See MemoryNamespace for detailed explanation of the WeakReference pattern.
-class _KernelWatcher {
-  final StreamController<Scroll> controller;
-
-  /// Weak reference to the stream returned to user
-  final WeakReference<Stream<Scroll>> streamRef;
-
-  _KernelWatcher({required this.controller})
-      : streamRef = WeakReference(controller.stream);
-
-  /// Check if this watcher is still alive
-  bool get isDead => controller.isClosed || streamRef.target == null;
 }

@@ -13,7 +13,7 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('store_test_');
     final key = Store.testKey();
-    store = await Store.open(tempDir.path, key);
+    store = Store.open(tempDir.path, key);
   });
 
   tearDown(() async {
@@ -27,7 +27,7 @@ void main() {
     group('open', () {
       test('creates store with valid key', () async {
         final key = Store.testKey();
-        final s = await Store.open('${tempDir.path}/new', key);
+        final s = Store.open('${tempDir.path}/new', key);
 
         expect(s.isEncrypted, isTrue);
         expect(s.path, equals('${tempDir.path}/new'));
@@ -45,7 +45,7 @@ void main() {
       test('creates directory structure', () async {
         final key = Store.testKey();
         final path = '${tempDir.path}/structured';
-        final s = await Store.open(path, key);
+        final s = Store.open(path, key);
 
         expect(Directory('$path/_scrolls').existsSync(), isTrue);
         expect(Directory('$path/_history').existsSync(), isTrue);
@@ -140,7 +140,7 @@ void main() {
         final createdAt = v1.metadata.createdAt;
 
         // Wait a tiny bit
-        Future.delayed(Duration(milliseconds: 10));
+        Future.delayed(const Duration(milliseconds: 10));
 
         store.write('/test', {'v': 2});
         final v2 = store.read('/test').value!;
@@ -203,7 +203,7 @@ void main() {
         store.write('/vault/note', {'title': 'Ignored'});
 
         // Allow events to propagate
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future.delayed(const Duration(milliseconds: 50));
 
         expect(events.length, equals(2));
         expect(events.any((s) => s.key == '/wallet/balance'), isTrue);
@@ -321,7 +321,7 @@ void main() {
     group('close', () {
       test('prevents further operations', () async {
         final key = Store.testKey();
-        final s = await Store.open('${tempDir.path}/close-test', key);
+        final s = Store.open('${tempDir.path}/close-test', key);
 
         s.close();
 

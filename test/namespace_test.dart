@@ -115,7 +115,7 @@ void main() {
 
   group('Result', () {
     test('Ok properties', () {
-      const result = Ok(42);
+      const result = Ok<int, NineError>(42);
       expect(result.isOk, isTrue);
       expect(result.isErr, isFalse);
       expect(result.value, equals(42));
@@ -124,7 +124,7 @@ void main() {
     });
 
     test('Err properties', () {
-      const result = Err<int>(NotFoundError('test'));
+      const result = Err<int, NineError>(NotFoundError('test'));
       expect(result.isOk, isFalse);
       expect(result.isErr, isTrue);
       expect(result.valueOrNull, isNull);
@@ -132,32 +132,32 @@ void main() {
     });
 
     test('value throws on Err', () {
-      const result = Err<int>(NotFoundError('test'));
+      const result = Err<int, NineError>(NotFoundError('test'));
       expect(() => result.value, throwsA(isA<NotFoundError>()));
     });
 
     test('map transforms Ok', () {
-      const result = Ok(21);
+      const result = Ok<int, NineError>(21);
       final doubled = result.map((x) => x * 2);
       expect(doubled.value, equals(42));
     });
 
     test('map preserves Err', () {
-      const result = Err<int>(NotFoundError('test'));
+      const result = Err<int, NineError>(NotFoundError('test'));
       final doubled = result.map((x) => x * 2);
       expect(doubled.isErr, isTrue);
     });
 
     test('flatMap chains', () {
-      Result<int> parse(String s) {
+      NineResult<int> parse(String s) {
         final n = int.tryParse(s);
         return n != null ? Ok(n) : const Err(InvalidDataError('not a number'));
       }
 
-      final result = const Ok('42').flatMap(parse);
+      final result = const Ok<String, NineError>('42').flatMap(parse);
       expect(result.value, equals(42));
 
-      final failed = const Ok('abc').flatMap(parse);
+      final failed = const Ok<String, NineError>('abc').flatMap(parse);
       expect(failed.isErr, isTrue);
     });
   });
